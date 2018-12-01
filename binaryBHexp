@@ -50,6 +50,8 @@ import argparse
 from scipy.interpolate import UnivariateSpline
 from scipy.interpolate import InterpolatedUnivariateSpline
 
+import scipy.signal
+
 import surfinBH
 import NRSur7dq2
 from NRSur7dq2 import harmonics
@@ -467,6 +469,24 @@ def get_waveform_timeseries(h_dict, azim, elev):
         h += h_dict[key]*ylm
     return h
 
+#----------------------------------------------------------------------------
+def linear_to_circ(h):
+   """ Convert a linearly-polarized signal h+ - ihx to circular
+   polarization, returning the left polarization in the real part of
+   the result, and the right polarization in the imaginary part of the
+   result.
+   """
+
+   h_p, h_x = np.real(h), -np.imag(h)
+
+   h_x_Hilb = scipy.signal.hilbert(h_x)
+   h_x_shift_neg = np.real(h_x_Hilb * np.exp( - np.pi/2 * 1j ))
+   h_x_shift_pos = np.real(h_x_Hilb * np.exp( + np.pi/2 * 1j ))
+
+   h_L = (h_p + h_x_shift_neg)/2
+   h_R = (h_p + h_x_shift_pos)/2
+
+   return h_L + 1j * h_R
 
 #----------------------------------------------------------------------------
 def get_camera_trajectory(t_binary, period=1000, stop_time=-500, azim_shift=1):
@@ -587,7 +607,7 @@ def update_lines(num, lines, hist_frames, t, t_binary, dataLines_binary, \
         q, mA, mB, chiA_nrsur, chiB_nrsur, mf, chif, vf, \
         waveform_end_time, freeze_idx, draw_full_trajectory, ax, vmin, vmax, \
         linthresh, camera_traj, height_map, project_on_all_planes, \
-        no_wave_time_series, no_freeze_near_merger, no_time_label, use_Kerr):
+        no_wave_time_series, circular_polarization, no_freeze_near_merger, no_time_label, use_Kerr):
     """ The function that goes into animation
     """
     current_time = t[num]
@@ -714,6 +734,9 @@ def update_lines(num, lines, hist_frames, t, t_binary, dataLines_binary, \
     # Plot waveform time series
     if not no_wave_time_series:
         h_viewpoint = get_waveform_timeseries(h_nrsur, ax.azim, ax.elev)
+        if circular_polarization:
+            # Convert from linear to circular polarization
+            h_viewpoint = linear_to_circ(h_viewpoint)
         for idx in range(3):
             line = lines[len(dataLines_binary)+len(dataLines_remnant)+idx]
 
@@ -740,6 +763,7 @@ def BBH_animation(fig, q, chiA, chiB, omega_ref=None, \
         still_time=None,  rescale_fig_for_widgets=False, \
         no_freeze_near_merger=False, omega_start=None, \
         no_wave_time_series=False, uniform_time_step_size=None, \
+        circular_polarization=False, \
         no_time_label=False, no_surrogate_label=False, \
         use_spin_angular_momentum_for_arrows=False):
 
@@ -869,6 +893,9 @@ def BBH_animation(fig, q, chiA, chiB, omega_ref=None, \
 
     # get wavefrom at viewpoint
     h_viewpoint = get_waveform_timeseries(h_nrsur, ax.azim, ax.elev)
+    if (circular_polarization):
+       # Convert from linear to circular polarization
+       h_viewpoint = linear_to_circ(h_viewpoint)
 
     if LOW_DEF:
         arrow_mutation_scale = 10
@@ -905,11 +932,14 @@ def BBH_animation(fig, q, chiA, chiB, omega_ref=None, \
         ]
 
     if not no_wave_time_series:
+        label_strs = ['$h_+$', '$h_{\\times}$']
+        if circular_polarization:
+            label_strs = ['$h_L$', '$h_R$']
         lines += [ \
             # These two is for plotting the waveform time series
-            hax.plot(t_binary, np.real(h_viewpoint), label='$h_+$', \
+            hax.plot(t_binary, np.real(h_viewpoint), label=label_strs[0], \
                 color=colors_dict['h+'], lw=1.2)[0], \
-            hax.plot(t_binary, np.imag(h_viewpoint), label='$h_{\\times}$', \
+            hax.plot(t_binary, np.imag(h_viewpoint), label=label_strs[1], \
                 color=colors_dict['hx'], lw=1.2)[0], \
 
             # This is for plotting the slider along the waveform time series
@@ -1006,6 +1036,7 @@ def BBH_animation(fig, q, chiA, chiB, omega_ref=None, \
             waveform_end_time, freeze_idx, draw_full_trajectory, ax, \
             vmin, vmax, linthresh, camera_traj, height_map, \
             project_on_all_planes, no_wave_time_series, \
+            circular_polarization, \
             no_freeze_near_merger, no_time_label, use_Kerr)
 
     # save still and exit
@@ -1105,6 +1136,9 @@ if __name__ == '__main__':
         ' bottom which changes based on viewing angle. This disables ' \
         'this feature. However, this will let you pause the movie by ' \
         'clicking on it.')
+    pp_special.add_argument('--circular_polarization', default=False, \
+        action='store_true', \
+        help='Plot circular instead of linear polarizations.')
     pp_special.add_argument('--uniform_time_step_size', type=float, \
         default=None, \
         help='Normally the movie time steps are uniform in orbital phase. ' \
@@ -1144,6 +1178,7 @@ if __name__ == '__main__':
         no_freeze_near_merger = args.no_freeze_near_merger,
         omega_start = args.omega_start,
         no_wave_time_series = args.no_wave_time_series,
+        circular_polarization = args.circular_polarization,
         uniform_time_step_size = args.uniform_time_step_size,
         still_time = args.still_time,
         no_time_label = args.no_time_label,
